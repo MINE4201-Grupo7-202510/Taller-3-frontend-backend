@@ -1,38 +1,41 @@
+// components/recommendations-content.tsx
 "use client"
 
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { 
-  ArrowLeft, Film, ThumbsUp, Users, Calendar, Tag as TagIcon, 
-  UserCircle, BarChart2, Lightbulb // Lightbulb se usará en el tooltip
+  ArrowLeft, Film, ThumbsUp, Tag as TagIcon, 
+  UserCircle, BarChart2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip" // Importar componentes de Tooltip
 import type { MovieDetails, Recommendation, NewUserRecommendation } from "@/lib/types"
+import MovieDetailsModal from "@/components/MovieDetailsModal" // Importar el nuevo modal
 
 const FASTAPI_URL = process.env.NEXT_PUBLIC_FASTAPI_URL || "http://localhost:8000"
 
+// Tipos enriquecidos con los nuevos campos de TMDB
 interface EnrichedRecommendation extends Recommendation {
   details?: MovieDetails | null
   imageUrl?: string
-  // explanation ya está en Recommendation
+  overview?: string // <-- Añadido
 }
 
 interface EnrichedNewUserRecommendation extends NewUserRecommendation {
-  details?: MovieDetails | null 
+  details?: MovieDetails | null
   imageUrl?: string
-  // explanation ya está en NewUserRecommendation
+  overview?: string // <-- Añadido
 }
 
+// Tipo para la respuesta de nuestra API Route de TMDB
+interface TmdbDetails {
+  imageUrl?: string | null;
+  overview?: string | null;
+}
+
+// Función para obtener detalles de la película desde FastAPI
 async function fetchMovieDetails(movieId: string): Promise<MovieDetails | null> {
   try {
     const res = await fetch(`${FASTAPI_URL}/movies/${movieId}`)
@@ -47,19 +50,20 @@ async function fetchMovieDetails(movieId: string): Promise<MovieDetails | null> 
   }
 }
 
-async function fetchMovieImage(imdbId: string | undefined): Promise<string | undefined> {
-  if (!imdbId) return undefined
+// Función para obtener imagen y sinopsis desde nuestra API Route
+async function fetchTmdbDetails(imdbId: string | undefined): Promise<TmdbDetails> {
+  if (!imdbId) return { imageUrl: undefined, overview: undefined }
   try {
     const res = await fetch(`/api/tmdb/image?imdbId=${imdbId}`)
     if (!res.ok) {
-      console.error(`Error fetching image for imdbId ${imdbId}: ${res.statusText}`)
-      return undefined
+      console.error(`Error fetching TMDB details for imdbId ${imdbId}: ${res.statusText}`)
+      return { imageUrl: undefined, overview: undefined }
     }
     const data = await res.json()
-    return data.imageUrl
+    return { imageUrl: data.imageUrl, overview: data.overview }
   } catch (error) {
-    console.error(`Network error fetching image for imdbId ${imdbId}:`, error)
-    return undefined
+    console.error(`Network error fetching TMDB details for imdbId ${imdbId}:`, error)
+    return { imageUrl: undefined, overview: undefined }
   }
 }
 
@@ -73,6 +77,10 @@ export default function RecommendationsContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [userName, setUserName] = useState<string>("")
+
+  // Estado para el modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedMovie, setSelectedMovie] = useState<EnrichedRecommendation | EnrichedNewUserRecommendation | null>(null);
 
   useEffect(() => {
     const getRecommendations = async () => {
@@ -102,17 +110,17 @@ export default function RecommendationsContent() {
         } else {
           throw new Error("Invalid parameters for recommendations.")
         }
-
+        
         if (rawRecommendations.length === 0) {
           setRecommendations([])
           setIsLoading(false)
           return
         }
-        
+
         const enrichedRecsPromises = rawRecommendations.map(async (rec) => {
           const details = await fetchMovieDetails(rec.movieId)
-          const imageUrl = details ? await fetchMovieImage(details.tconst) : undefined
-          return { ...rec, details, imageUrl } 
+          const { imageUrl, overview } = details ? await fetchTmdbDetails(details.tconst) : { imageUrl: undefined, overview: undefined }
+          return { ...rec, details, imageUrl: imageUrl || undefined, overview: overview || undefined } 
         })
 
         const enrichedRecs = await Promise.all(enrichedRecsPromises)
@@ -129,7 +137,17 @@ export default function RecommendationsContent() {
     getRecommendations()
   }, [userId, type, genresParam])
 
-  // Estados de carga, error y sin recomendaciones (sin cambios)
+  // Handlers para el modal
+  const handleMovieClick = (movie: EnrichedRecommendation | EnrichedNewUserRecommendation) => {
+    setSelectedMovie(movie);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedMovie(null);
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50 p-4">
@@ -218,83 +236,76 @@ export default function RecommendationsContent() {
             </div>
           </div>
            <p className="text-sm text-gray-600 mt-1">
-            Mostrando las {recommendations.length} mejores recomendaciones. Pasa el cursor sobre una película para ver por qué te la recomendamos.
+            Mostrando las {recommendations.length} mejores recomendaciones. Haz clic en una película para ver todos los detalles.
           </p>
         </div>
         
-        <TooltipProvider delayDuration={200}> {/* Proveedor de Tooltip para el grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {recommendations.map((rec, index) => (
-              <Tooltip key={rec.movieId + "_" + index + "_tooltip"}>
-                <TooltipTrigger asChild>
-                  <Card className="overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300 flex flex-col cursor-default"> {/* cursor-default para indicar que hay hover */}
-                    <CardHeader className="p-0">
-                      {rec.imageUrl ? (
-                        <img
-                          src={rec.imageUrl}
-                          alt={`Póster de ${rec.details?.title || "Película"}`}
-                          className="w-full h-80 object-cover"
-                          onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.onerror = null; 
-                              target.src = "/placeholder.svg"; 
-                              target.classList.add("object-contain");
-                            }}
-                        />
-                      ) : (
-                        <div className="w-full h-80 bg-gray-200 flex items-center justify-center">
-                          <Film className="w-16 h-16 text-gray-400" />
-                        </div>
-                      )}
-                    </CardHeader>
-                    <CardContent className="p-4 flex-grow flex flex-col justify-between">
-                      <div>
-                        <CardTitle className="text-lg mb-1 line-clamp-2">{rec.details?.title || "Título no disponible"}</CardTitle>
-                        <CardDescription className="text-sm text-gray-600 mb-2">
-                          Película ID: {rec.movieId}
-                        </CardDescription>
-                        
-                        <div className="space-y-1 mb-3">
-                          {rec.details?.genres && rec.details.genres.length > 0 && (
-                            <div className="flex items-center text-xs text-gray-500">
-                              <TagIcon className="w-3 h-3 mr-1.5 text-purple-500" />
-                              {rec.details.genres.join(", ")}
-                            </div>
-                          )}
-                          {type === 'existing' && 'score' in rec && typeof rec.score === 'number' && (
-                              <div className="flex items-center text-xs text-gray-500">
-                                  <BarChart2 className="w-3 h-3 mr-1.5 text-blue-500" />
-                                  Puntuación: {rec.score.toFixed(3)}
-                              </div>
-                          )}
-                          {type === 'new' && 'rating_count' in rec && (
-                              <div className="flex items-center text-xs text-gray-500">
-                                  <ThumbsUp className="w-3 h-3 mr-1.5 text-green-500" />
-                                  Popularidad: {rec.rating_count} calif.
-                              </div>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TooltipTrigger>
-                {rec.explanation && (
-                  <TooltipContent 
-                    side="top" // Posición del tooltip
-                    align="center" // Alineación del tooltip
-                    className="max-w-xs p-3 bg-gray-800 text-white rounded-md shadow-lg text-sm z-50" // Estilos y z-index
-                  >
-                    <div className="flex items-start gap-2">
-                      <Lightbulb className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
-                      <p>{rec.explanation}</p>
-                    </div>
-                  </TooltipContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {recommendations.map((rec, index) => (
+            <Card
+              key={rec.movieId + "_" + index}
+              className="overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300 flex flex-col cursor-pointer"
+              onClick={() => handleMovieClick(rec)}
+            >
+              <CardHeader className="p-0">
+                {rec.imageUrl ? (
+                  <img
+                    src={rec.imageUrl}
+                    alt={`Póster de ${rec.details?.title || "Película"}`}
+                    className="w-full h-80 object-cover"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.onerror = null; 
+                      target.src = "/placeholder.svg"; 
+                      target.classList.add("object-contain");
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-80 bg-gray-200 flex items-center justify-center">
+                    <Film className="w-16 h-16 text-gray-400" />
+                  </div>
                 )}
-              </Tooltip>
-            ))}
-          </div>
-        </TooltipProvider>
+              </CardHeader>
+              <CardContent className="p-4 flex-grow flex flex-col justify-between">
+                <div>
+                  <CardTitle className="text-lg mb-1 line-clamp-2">{rec.details?.title || "Título no disponible"}</CardTitle>
+                  <CardDescription className="text-sm text-gray-600 mb-2">
+                    Película ID: {rec.movieId}
+                  </CardDescription>
+                  
+                  <div className="space-y-1 mb-3">
+                    {rec.details?.genres && rec.details.genres.length > 0 && (
+                      <div className="flex items-center text-xs text-gray-500">
+                        <TagIcon className="w-3 h-3 mr-1.5 text-purple-500" />
+                        {rec.details.genres.slice(0, 3).join(", ")}
+                      </div>
+                    )}
+                    {type === 'existing' && 'score' in rec && typeof rec.score === 'number' && (
+                      <div className="flex items-center text-xs text-gray-500">
+                        <BarChart2 className="w-3 h-3 mr-1.5 text-blue-500" />
+                        Puntuación: {rec.score.toFixed(3)}
+                      </div>
+                    )}
+                    {type === 'new' && 'rating_count' in rec && (
+                      <div className="flex items-center text-xs text-gray-500">
+                        <ThumbsUp className="w-3 h-3 mr-1.5 text-green-500" />
+                        Popularidad: {rec.rating_count} calif.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </main>
+
+      {/* Renderizar el modal */}
+      <MovieDetailsModal
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
+        movie={selectedMovie}
+      />
     </div>
   )
 }

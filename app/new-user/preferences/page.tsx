@@ -4,31 +4,16 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, Sparkles, Star, Check, Film, Loader2 } from "lucide-react"
+import { ArrowLeft, Sparkles, Check, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { MovieDetails } from "@/lib/types"; // Para popularMovies si se quiere enriquecer
 
 const FASTAPI_URL = process.env.NEXT_PUBLIC_FASTAPI_URL || "http://localhost:8000"
-
-// Esta lista de películas populares se mantendrá mockeada por ahora,
-// ya que el taller no especifica un endpoint para obtener "películas populares para calificar"
-// y enriquecerlas todas con TMDB al inicio podría ser lento.
-// Se podría crear un endpoint en FastAPI para esto si fuera necesario.
-const popularMoviesToRate = [
-  { id: "1", title: "The Shawshank Redemption", year: 1994, genresDisplay: "Drama" }, // Usaremos movieId como string para consistencia
-  { id: "349", title: "The Godfather", year: 1972, genresDisplay: "Crime, Drama" }, // Ejemplo, IDs deben ser reales del dataset
-  { id: "296", title: "Pulp Fiction", year: 1994, genresDisplay: "Crime, Drama" },
-  { id: "58559", title: "The Dark Knight", year: 2008, genresDisplay: "Action, Crime, Drama" },
-  { id: "356", title: "Forrest Gump", year: 1994, genresDisplay: "Drama, Romance" },
-  // ... más películas si se desea, usando movieIds reales
-]
 
 export default function NewUserPreferencesPage() {
   const [availableGenres, setAvailableGenres] = useState<string[]>([])
   const [selectedGenres, setSelectedGenres] = useState<string[]>([])
-  const [movieRatings, setMovieRatings] = useState<Record<string, number>>({}) // movieId como string
   const [isLoading, setIsLoading] = useState(false)
   const [isFetchingGenres, setIsFetchingGenres] = useState(true)
   const [fetchGenresError, setFetchGenresError] = useState<string | null>(null)
@@ -57,21 +42,12 @@ export default function NewUserPreferencesPage() {
     fetchGenres()
   }, [])
 
-
   const toggleGenre = (genre: string) => {
     setSelectedGenres((prev) => (prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]))
   }
 
-  const rateMovie = (movieId: string, rating: number) => {
-    setMovieRatings((prev) => ({
-      ...prev,
-      [movieId]: rating,
-    }))
-  }
-
   const handleSubmit = async () => {
-    if (selectedGenres.length === 0 && Object.keys(movieRatings).length === 0) {
-      // Aunque el botón debe estar deshabilitado, es una doble verificación
+    if (selectedGenres.length === 0) {
       return
     }
 
@@ -79,21 +55,14 @@ export default function NewUserPreferencesPage() {
     
     const params = new URLSearchParams({
       type: "new",
+      genres: selectedGenres.join(","),
     })
-    if (selectedGenres.length > 0) {
-        params.append("genres", selectedGenres.join(","))
-    }
-    if (Object.keys(movieRatings).length > 0) {
-        // Nota: Las calificaciones de nuevos usuarios no se utilizan actualmente
-        // en el endpoint /recommend/new_user de FastAPI. Se pasan por si se implementa en el futuro.
-        params.append("ratings", JSON.stringify(movieRatings))
-    }
     
     // La página de recomendaciones se encargará de la lógica de la API
     router.push(`/recommendations?${params.toString()}`)
   }
 
-  const canSubmit = selectedGenres.length > 0 || Object.keys(movieRatings).length > 0
+  const canSubmit = selectedGenres.length > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-teal-50">
@@ -158,55 +127,10 @@ export default function NewUserPreferencesPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Star className="w-5 h-5 text-yellow-500" />
-                Califica Algunas Películas (Opcional)
-              </CardTitle>
-              <CardDescription>
-                Califica películas que hayas visto para ayudarnos a entender tus gustos. (Actualmente, esto es más para una futura mejora del sistema).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4">
-                {popularMoviesToRate.map((movie) => (
-                  <div
-                    key={movie.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
-                  >
-                    <div className="flex-1">
-                      <h4 className="font-semibold">{movie.title}</h4>
-                      <p className="text-sm text-gray-600">
-                        {movie.year} • {movie.genresDisplay}
-                      </p>
-                    </div>
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4, 5].map((rating) => (
-                        <button
-                          key={rating}
-                          onClick={() => rateMovie(movie.id, rating)}
-                          className={`p-1 transition-colors ${
-                            (movieRatings[movie.id] || 0) >= rating
-                              ? "text-yellow-500"
-                              : "text-gray-300 hover:text-yellow-400"
-                          }`}
-                        >
-                          <Star className="w-5 h-5 fill-current" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-sm text-gray-600 mt-4">Películas calificadas: {Object.keys(movieRatings).length}</p>
-            </CardContent>
-          </Card>
-
           <div className="text-center">
             <Button
               onClick={handleSubmit}
-              disabled={!canSubmit || isLoading || (isFetchingGenres && selectedGenres.length === 0)}
+              disabled={!canSubmit || isLoading || isFetchingGenres}
               className="bg-green-600 hover:bg-green-700 text-lg py-3 px-8"
             >
               {isLoading ? (
@@ -216,9 +140,9 @@ export default function NewUserPreferencesPage() {
                   </>
               ) : "Generar Recomendaciones"}
             </Button>
-            {!canSubmit && (
+            {!canSubmit && !isLoading && (
               <p className="text-sm text-red-500 mt-2">
-                Selecciona al menos un género o califica una película para continuar.
+                Selecciona al menos un género para continuar.
               </p>
             )}
           </div>

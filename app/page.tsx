@@ -53,7 +53,6 @@ export default function HomePage() {
               <ul className="text-sm text-gray-600 mb-6 space-y-2">
                 <li>• Recomendaciones basadas en tu historial</li>
                 <li>• Análisis de usuarios similares</li>
-                <li>• Métricas de precisión P@5 y P@10</li>
               </ul>
               <Link href="/existing-user">
                 <Button className="w-full bg-blue-600 hover:bg-blue-700">Continuar como Usuario Existente</Button>
